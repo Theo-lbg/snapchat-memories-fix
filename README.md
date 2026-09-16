@@ -23,7 +23,25 @@ matched and deduplicated by ID first, then read directly out of the zips one
 nested archive at a time, so it never needs to hold the full export
 uncompressed on disk at once.
 
-## Setup
+## Download
+
+Grab the latest build from the [Releases page](../../releases):
+
+- **macOS Apple Silicon (M1-M4)** → `Snapchat-Memories-Fixer-macos-arm64.zip`
+- **macOS Intel** → `Snapchat-Memories-Fixer-macos-intel.zip`
+- **Windows** → `Snapchat-Memories-Fixer-windows.exe`
+
+`ffmpeg` is required for video processing but isn't bundled — install it
+separately: `brew install ffmpeg` (macOS) or `winget install ffmpeg`
+(Windows). Photos still work without it; the app warns on launch if it's
+missing.
+
+The app isn't signed (no paid developer account), so on first launch:
+- **macOS**: right-click → *Open* (instead of double-click) to get past
+  Gatekeeper.
+- **Windows**: SmartScreen will complain → *More info* → *Run anyway*.
+
+## Setup (from source)
 
 ```bash
 python3 -m venv .venv
@@ -96,3 +114,17 @@ Two passes, because the JSON has no filename to key off of:
   is re-encoded to burn the overlay in (dimensions are padded to even
   numbers first — some Snapchat videos have odd pixel dimensions, which
   libx264 otherwise refuses to encode).
+
+## Building a standalone executable
+
+```bash
+pip install pyinstaller
+pyinstaller snapfixer.spec --noconfirm
+```
+
+Official builds (macOS arm64/Intel + Windows) are produced automatically by
+[GitHub Actions](.github/workflows/build.yml) on every `vX.Y.Z` tag.
+
+## Licence
+
+Apache 2.0 — see [LICENSE](LICENSE).

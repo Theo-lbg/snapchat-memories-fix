@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import queue
 import shutil
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -43,6 +44,7 @@ class App(tk.Tk):
 
         self._build_ui()
         self.after(100, self._poll_queue)
+        self.after(200, self._check_ffmpeg)
 
     # ------------------------------------------------------------------ UI
 
@@ -117,6 +119,24 @@ class App(tk.Tk):
         self.log_text.pack(fill="both", expand=True, padx=8, pady=8)
 
     # -------------------------------------------------------------- events
+
+    def _check_ffmpeg(self):
+        if shutil.which("ffmpeg"):
+            return
+        if sys.platform == "darwin":
+            howto = "Terminal : «brew install ffmpeg» (installe d'abord Homebrew sur brew.sh si besoin)."
+        elif sys.platform == "win32":
+            howto = (
+                "Le plus simple : «winget install ffmpeg» dans un Terminal, "
+                "ou installe-le depuis ffmpeg.org et ajoute-le au PATH."
+            )
+        else:
+            howto = "Installe le paquet ffmpeg de ta distribution (ex: apt install ffmpeg)."
+        messagebox.showwarning(
+            APP_TITLE,
+            "ffmpeg est introuvable sur cet ordinateur : les vidéos ne pourront pas être "
+            "corrigées (les photos, oui). " + howto,
+        )
 
     def _choose_source_zip(self):
         chosen = filedialog.askopenfilename(title="Choisir le zip de l'export Snapchat", filetypes=[("Zip", "*.zip")])

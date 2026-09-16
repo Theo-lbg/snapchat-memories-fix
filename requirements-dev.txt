@@ -1,0 +1,4 @@
+# Only needed to build a standalone executable with PyInstaller.
+# Running the app from source (`python3 app.py`) needs the packages in
+# requirements.txt, plus ffmpeg on the system PATH.
+pyinstaller>=6.0
