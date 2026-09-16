@@ -61,9 +61,22 @@ def _find_json(root: Path) -> Optional[Path]:
     return candidates[0] if candidates else None
 
 
-def _uuid_kind_of(zip_entry_name: str) -> Optional[tuple[str, str]]:
-    m = MEMORIES_RE.match(zip_entry_name.rsplit("/", 1)[-1])
+def _uuid_kind_of(name: str) -> Optional[tuple[str, str]]:
+    m = MEMORIES_RE.match(name.rsplit("/", 1)[-1])
     return (m.group("uuid"), m.group("kind")) if m else None
+
+
+@dataclass(frozen=True)
+class _NestedZip:
+    """A zip to pull memories from lazily, one at a time.
+
+    `entry` is None when `outer` is itself a standalone .zip file already
+    sitting on disk (e.g. a Snapchat "-N.zip" chunk found loose inside a
+    folder source, never extracted). Otherwise `outer` is the zip that
+    embeds this one, and `entry` is its name inside it."""
+
+    outer: Path
+    entry: Optional[str] = None
 
 
 class ExportSource:
@@ -80,10 +93,10 @@ class ExportSource:
         self._tmp = tempfile.mkdtemp(prefix="snapfixer_")
         self.memories_json: Optional[Path] = None
         self._primary_dir: Optional[Path] = None
-        # (outer_zip_path, entry_name) for each nested zip, extracted lazily
-        # one at a time in iter_media() so we never hold more than one
-        # nested zip's worth of extra disk space at once.
-        self._nested_entries: list[tuple[Path, str]] = []
+        # One entry per nested zip (standalone file or embedded in another
+        # zip), extracted lazily one at a time in iter_media() so we never
+        # hold more than one nested zip's worth of extra disk space at once.
+        self._nested_entries: list[_NestedZip] = []
         # Snapchat/export-tool zips can genuinely duplicate a whole chunk
         # (seen in the wild: both an already-extracted "-13" folder and a
         # "-13.zip" with the identical files). Track uuids already claimed
@@ -104,10 +117,27 @@ class ExportSource:
             kept.append(n)
         return kept
 
+    def _filter_new_paths(self, paths: list[Path]) -> list[Path]:
+        kept = []
+        for p in paths:
+            uuid_kind = _uuid_kind_of(p.name)
+            if uuid_kind is None:
+                continue
+            if uuid_kind in self._seen:
+                continue
+            self._seen.add(uuid_kind)
+            kept.append(p)
+        return kept
+
     def __enter__(self) -> "ExportSource":
         if self.path.is_dir():
             self._primary_dir = self.path
             self.memories_json = _find_json(self.path)
+            # A folder source can itself contain loose "-N.zip" chunks that
+            # were never extracted (e.g. the user dumped Snapchat's several
+            # downloaded zips into one folder without unzipping them) -- an
+            # already-extracted "memories" folder alone isn't the whole story.
+            self._nested_entries = [_NestedZip(outer=p) for p in self.path.rglob("*.zip")]
         elif zipfile.is_zipfile(self.path):
             self._open_outer_zip(self.path)
         else:
@@ -132,13 +162,13 @@ class ExportSource:
                 self._primary_dir = extract_dir
                 self.memories_json = _find_json(extract_dir)
 
-            self._nested_entries = [(zip_path, n) for n in nested_zips]
+            self._nested_entries = [_NestedZip(outer=zip_path, entry=n) for n in nested_zips]
 
         if self.memories_json is None and self._nested_entries:
             # Rare shape: the primary folder itself is one of the "nested" zips.
-            for outer, entry in list(self._nested_entries):
+            for nz in list(self._nested_entries):
                 tmp_copy = Path(self._tmp) / "peek.zip"
-                with zipfile.ZipFile(outer) as zf, zf.open(entry) as src, open(tmp_copy, "wb") as out:
+                with zipfile.ZipFile(nz.outer) as zf, zf.open(nz.entry) as src, open(tmp_copy, "wb") as out:
                     shutil.copyfileobj(src, out)
                 if zipfile.is_zipfile(tmp_copy):
                     with zipfile.ZipFile(tmp_copy) as zf2:
@@ -147,7 +177,7 @@ class ExportSource:
                             zf2.extractall(extract_dir)
                             self._primary_dir = extract_dir
                             self.memories_json = _find_json(extract_dir)
-                            self._nested_entries.remove((outer, entry))
+                            self._nested_entries.remove(nz)
                             tmp_copy.unlink(missing_ok=True)
                             break
                 tmp_copy.unlink(missing_ok=True)
@@ -192,15 +222,21 @@ class ExportSource:
                 if memories_dir.is_dir():
                     consume([p.name for p in memories_dir.iterdir() if p.is_file()])
 
-        for outer, entry in self._nested_entries:
-            with zipfile.ZipFile(outer) as zf:
-                with zf.open(entry) as stream:
+        for nz in self._nested_entries:
+            if nz.entry is None:
+                # Standalone zip file already on disk -- list it directly.
+                with zipfile.ZipFile(nz.outer) as zf:
+                    consume(zf.namelist())
+                continue
+
+            with zipfile.ZipFile(nz.outer) as zf:
+                with zf.open(nz.entry) as stream:
                     if stream.seekable():
                         with zipfile.ZipFile(stream) as zf2:
                             consume(zf2.namelist())
                         continue
                 tmp_copy = Path(self._tmp) / "list_peek.zip"
-                with zipfile.ZipFile(outer) as zf3, zf3.open(entry) as src, open(tmp_copy, "wb") as out:
+                with zipfile.ZipFile(nz.outer) as zf3, zf3.open(nz.entry) as src, open(tmp_copy, "wb") as out:
                     shutil.copyfileobj(src, out)
                 with zipfile.ZipFile(tmp_copy) as zf2:
                     consume(zf2.namelist())
@@ -219,21 +255,31 @@ class ExportSource:
         if self._primary_dir is not None:
             for memories_dir in self._primary_dir.rglob("memories"):
                 if memories_dir.is_dir():
-                    files = {p.name: p for p in memories_dir.iterdir() if p.is_file()}
+                    kept = self._filter_new_paths([p for p in memories_dir.iterdir() if p.is_file()])
+                    files = {p.name: p for p in kept}
                     yield from _classify(files)
 
-        for outer, entry in self._nested_entries:
-            nested_copy = Path(self._tmp) / "nested.zip"
-            with zipfile.ZipFile(outer) as zf, zf.open(entry) as src, open(nested_copy, "wb") as out:
-                shutil.copyfileobj(src, out)
-
+        for nz in self._nested_entries:
             extract_dir = Path(self._tmp) / "extract_nested"
-            with zipfile.ZipFile(nested_copy) as zf:
-                members = self._filter_new(
-                    [n for n in zf.namelist() if IN_MEMORIES_DIR_RE.search(n) and not n.endswith("/")]
-                )
-                zf.extractall(extract_dir, members=members)
-            nested_copy.unlink(missing_ok=True)
+
+            if nz.entry is None:
+                # Standalone zip file already on disk -- open it directly,
+                # no temp copy needed (and never delete the user's own file).
+                with zipfile.ZipFile(nz.outer) as zf:
+                    members = self._filter_new(
+                        [n for n in zf.namelist() if IN_MEMORIES_DIR_RE.search(n) and not n.endswith("/")]
+                    )
+                    zf.extractall(extract_dir, members=members)
+            else:
+                nested_copy = Path(self._tmp) / "nested.zip"
+                with zipfile.ZipFile(nz.outer) as zf, zf.open(nz.entry) as src, open(nested_copy, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                with zipfile.ZipFile(nested_copy) as zf:
+                    members = self._filter_new(
+                        [n for n in zf.namelist() if IN_MEMORIES_DIR_RE.search(n) and not n.endswith("/")]
+                    )
+                    zf.extractall(extract_dir, members=members)
+                nested_copy.unlink(missing_ok=True)
 
             memories_dirs = list(extract_dir.rglob("memories"))
             for memories_dir in memories_dirs:
