@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import metadata, overlay
+from . import _proc, metadata, overlay
 from .matcher import build_match_index, load_json_entries
 from .zip_source import ExportSource, MediaItem
 
@@ -180,7 +180,7 @@ VIDEO_SUFFIXES = (".mp4", ".mov")
 
 def _is_full_range(path: Path) -> bool:
     try:
-        out = subprocess.run(
+        out = _proc.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=color_range", "-of", "default=nw=1:nk=1", str(path)],
             capture_output=True, text=True, timeout=120,

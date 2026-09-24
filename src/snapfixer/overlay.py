@@ -3,12 +3,13 @@ its -main photo or video, the way it looked in Snapchat."""
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image
+
+from . import _proc
 
 # Encoder settings that produce what iPhones write (limited-range yuv420p,
 # BT.709) and what iCloud/Apple Photos accept.
@@ -33,7 +34,7 @@ def repair_video_colors(path: Path, out_path: Path) -> None:
         "-c:a", "copy",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True)
+    _proc.run(cmd, check=True)
 
 
 def merge_image_overlay(main_path: Path, overlay_path: Path, out_path: Path) -> None:
@@ -80,4 +81,4 @@ def merge_video_overlay(
         iso6709 = f"{lat:+.4f}{lon:+.4f}/"
         cmd += ["-metadata", f"location={iso6709}", "-metadata", f"com.apple.quicktime.location.ISO={iso6709}"]
     cmd.append(str(out_path))
-    subprocess.run(cmd, check=True)
+    _proc.run(cmd, check=True)

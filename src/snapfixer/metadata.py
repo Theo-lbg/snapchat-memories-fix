@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import piexif
+
+from . import _proc
 
 _HAS_SETFILE = shutil.which("SetFile") is not None
 
@@ -63,7 +64,7 @@ def write_video_metadata(path: Path, timestamp: datetime, lat: Optional[float], 
         cmd += ["-metadata", f"location={iso6709}", "-metadata", f"com.apple.quicktime.location.ISO={iso6709}"]
     cmd.append(str(out_path))
 
-    subprocess.run(cmd, check=True)
+    _proc.run(cmd, check=True)
     return out_path
 
 
@@ -75,7 +76,7 @@ def set_filesystem_dates(path: Path, timestamp: datetime) -> None:
     ts = timestamp.timestamp()
     os.utime(path, (ts, ts))
     if _HAS_SETFILE:
-        subprocess.run(
+        _proc.run(
             ["SetFile", "-d", timestamp.strftime("%m/%d/%Y %H:%M:%S"), str(path)],
             check=False,
         )
