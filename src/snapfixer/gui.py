@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 from snapfixer import core
 
 APP_TITLE = "Snapchat Memories Fixer"
-WINDOW_SIZE = "820x680"
+WINDOW_SIZE = "820x760"
 GB = 1024 ** 3
 
 
@@ -36,6 +36,7 @@ class App(tk.Tk):
         self.merge_overlay_var = tk.BooleanVar(value=True)
         self.dry_run_var = tk.BooleanVar(value=False)
         self.only_overlay_videos_var = tk.BooleanVar(value=False)
+        self.repair_var = tk.BooleanVar(value=False)
         self.use_limit_var = tk.BooleanVar(value=False)
         self.limit_var = tk.StringVar(value="50")
         self.space_note_var = tk.StringVar(value="")
@@ -97,6 +98,14 @@ class App(tk.Tk):
             row3b,
             text="Ne retraiter que les vidéos avec superposition (répare une sortie déjà générée, dans le même dossier)",
             variable=self.only_overlay_videos_var,
+        ).pack(side="left")
+
+        row3c = ttk.Frame(opts_frame)
+        row3c.pack(fill="x", padx=8, pady=4)
+        ttk.Checkbutton(
+            row3c,
+            text="Réparer un dossier déjà corrigé (sans l'export d'origine) : le choisir comme source ci-dessus",
+            variable=self.repair_var,
         ).pack(side="left")
 
         row4 = ttk.Frame(opts_frame)
@@ -196,6 +205,22 @@ class App(tk.Tk):
     def _start(self):
         source = self.source_var.get().strip()
         output = self.output_var.get().strip()
+        if self.repair_var.get():
+            if not source or not os.path.isdir(source):
+                messagebox.showerror(APP_TITLE, "Choisis comme source le dossier déjà corrigé à réparer.")
+                return
+            if self._worker and self._worker.is_alive():
+                return
+            self.log_text.configure(state="normal")
+            self.log_text.delete("1.0", "end")
+            self.log_text.configure(state="disabled")
+            self.progress["value"] = 0
+            self.run_button.configure(state="disabled")
+            self._worker = threading.Thread(
+                target=self._run_repair_worker, args=(Path(source), self.dry_run_var.get()), daemon=True
+            )
+            self._worker.start()
+            return
         if not source or not os.path.exists(source):
             messagebox.showerror(APP_TITLE, "Choisis d'abord un export Snapchat valide (zip ou dossier).")
             return
@@ -246,6 +271,21 @@ class App(tk.Tk):
         self._worker = threading.Thread(target=self._run_worker, args=(Path(source), Path(output), options), daemon=True)
         self._worker.start()
 
+    def _run_repair_worker(self, folder: Path, dry_run: bool):
+        try:
+            def on_progress(i, total, result):
+                self._queue.put(("progress", i, total, result))
+
+            summary = core.repair_folder(folder, dry_run=dry_run, on_progress=on_progress)
+            msg = f"Terminé. {summary.ok}/{summary.total} vidéo(s) réparée(s) dans {folder}."
+            if summary.total == 0:
+                msg = "Rien à réparer : aucune vidéo en plage de couleurs non standard dans ce dossier."
+            if summary.failed:
+                msg += f" {summary.failed} échec(s), voir le journal ci-dessus."
+            self._queue.put(("done", msg))
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the user
+            self._queue.put(("error", str(exc)))
+
     def _run_worker(self, source: Path, output: Path, options: core.Options):
         try:
             def on_progress(i, total, result):
@@ -290,6 +330,8 @@ class App(tk.Tk):
             return f"{prefix} — simulation, ignoré"
         if not result.ok:
             return f"{prefix} — ÉCHEC : {result.message}"
+        if result.timestamp is None:
+            return f"{prefix} — réparée"
         gps_note = "" if result.has_gps else " (date seule, pas de correspondance JSON exacte)"
         return f"{prefix} -> {result.outname} ({result.timestamp:%d/%m/%Y %H:%M}){gps_note}"
 

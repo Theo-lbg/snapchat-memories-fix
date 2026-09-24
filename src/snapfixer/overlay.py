@@ -10,6 +10,31 @@ from typing import Optional
 
 from PIL import Image
 
+# Encoder settings that produce what iPhones write (limited-range yuv420p,
+# BT.709) and what iCloud/Apple Photos accept.
+STANDARD_X264_ARGS = [
+    "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-profile:v", "high",
+    "-pix_fmt", "yuv420p",
+    "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off",
+    "-movflags", "+faststart",
+]
+
+
+def repair_video_colors(path: Path, out_path: Path) -> None:
+    """Re-encodes an already-composited full-range (color_range=pc) video to
+    standard limited-range yuv420p BT.709, keeping audio and all container
+    metadata (creation_time, GPS location)."""
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(path),
+        "-vf", "scale=in_range=pc:out_range=tv:out_color_matrix=bt709,format=yuv420p",
+        *STANDARD_X264_ARGS,
+        "-map_metadata", "0",
+        "-c:a", "copy",
+        str(out_path),
+    ]
+    subprocess.run(cmd, check=True)
+
 
 def merge_image_overlay(main_path: Path, overlay_path: Path, out_path: Path) -> None:
     base = Image.open(main_path).convert("RGBA")
@@ -45,10 +70,7 @@ def merge_video_overlay(
         "-filter_complex",
         "[0:v][1:v]scale2ref[base][ovr];[base][ovr]overlay=0:0,pad=ceil(iw/2)*2:ceil(ih/2)*2,"
         "scale=out_range=tv:out_color_matrix=bt709,format=yuv420p",
-        "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-profile:v", "high",
-        "-pix_fmt", "yuv420p",
-        "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off",
-        "-movflags", "+faststart",
+        *STANDARD_X264_ARGS,
         "-map_metadata", "0",
         "-c:a", "copy",
     ]

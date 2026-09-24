@@ -19,13 +19,29 @@ def _format_result(i: int, total: int, result: core.ItemResult) -> str:
     return f"{prefix} -> {result.outname} ({result.timestamp:%Y-%m-%d %H:%M})" + gps_note
 
 
+def _print_progress(i: int, total: int, result: core.ItemResult) -> None:
+    if result.skipped:
+        print(f"[{i}/{total}] {result.name} -- simulation, serait reparee")
+    elif not result.ok:
+        print(f"[{i}/{total}] {result.name} -- ECHEC : {result.message}")
+    else:
+        print(f"[{i}/{total}] {result.name} -- reparee")
+    sys.stdout.flush()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Recovers timestamps, GPS and overlays for a Snapchat data export.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--source", required=True, type=Path, help="Snapchat export zip or extracted folder")
-    parser.add_argument("--output", required=True, type=Path, help="destination folder for fixed photos/videos")
+    parser.add_argument("--source", type=Path, help="Snapchat export zip or extracted folder")
+    parser.add_argument("--output", type=Path, help="destination folder for fixed photos/videos")
+    parser.add_argument(
+        "--repair-folder",
+        type=Path,
+        help="repair videos in an already-generated output folder, in place (no export needed): "
+        "re-encodes full-range videos iCloud rejects to standard yuv420p",
+    )
     parser.add_argument("--limit", type=int, default=None, help="only process the first N items (for testing)")
     parser.add_argument("--no-overlay", action="store_true", help="don't merge -overlay.png onto -main files")
     parser.add_argument("--dry-run", action="store_true", help="match and report, but don't write any output")
@@ -36,6 +52,18 @@ def main() -> int:
         "rewrites them in place in --output, leaving everything else untouched",
     )
     args = parser.parse_args()
+
+    if args.repair_folder:
+        try:
+            summary = core.repair_folder(args.repair_folder, dry_run=args.dry_run, on_progress=_print_progress)
+        except core.SourceError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"\ndone: {summary.ok}/{summary.total} video(s) reparee(s) dans {args.repair_folder}")
+        return 1 if summary.failed else 0
+
+    if not args.source or not args.output:
+        parser.error("--source and --output are required (or use --repair-folder)")
 
     options = core.Options(
         merge_overlay=not args.no_overlay,

@@ -17,7 +17,9 @@ alongside the output. So:
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -171,3 +173,63 @@ def run(source: Path, output: Path, options: Options, on_progress: Optional[Call
                 break
 
         return summary
+
+
+VIDEO_SUFFIXES = (".mp4", ".mov")
+
+
+def _is_full_range(path: Path) -> bool:
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=color_range", "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.stdout.strip() == "pc"
+
+
+def repair_folder(
+    folder: Path,
+    dry_run: bool = False,
+    on_progress: Optional[Callable[[int, int, ItemResult], None]] = None,
+) -> RunSummary:
+    """Fixes videos in an already-generated output folder, in place, without
+    needing the original Snapchat export: any video flagged full-range
+    (color_range=pc) -- which iCloud/Photos reject -- is re-encoded to
+    standard limited-range yuv420p BT.709. Overlays are already burned in at
+    that point, so only the color encoding needs correcting. Files that are
+    already fine are left untouched (no re-encode, no quality loss); file
+    dates are preserved."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise SourceError(f"{folder} n'est pas un dossier.")
+
+    videos = sorted(
+        p for p in folder.rglob("*")
+        if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES and ".repairing" not in p.name
+    )
+    todo = [p for p in videos if _is_full_range(p)]
+
+    summary = RunSummary(total=len(todo))
+    for i, path in enumerate(todo, 1):
+        result = ItemResult(name=path.name, outname=path.name)
+        if dry_run:
+            result.skipped = True
+        else:
+            tmp = path.with_name(path.stem + ".repairing" + path.suffix)
+            try:
+                st = path.stat()
+                overlay.repair_video_colors(path, tmp)
+                os.replace(tmp, path)
+                metadata.set_filesystem_dates(path, datetime.fromtimestamp(st.st_mtime))
+                summary.ok += 1
+            except Exception as exc:  # noqa: BLE001 - report per file, keep going
+                result.ok = False
+                result.message = str(exc)
+                summary.failed += 1
+                tmp.unlink(missing_ok=True)
+        if on_progress:
+            on_progress(i, len(todo), result)
+    return summary
