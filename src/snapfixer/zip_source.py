@@ -103,6 +103,8 @@ class ExportSource:
         # for extraction so a later duplicate is skipped before we ever pay
         # to extract or re-encode it.
         self._seen: set[tuple[str, str]] = set()  # (uuid, kind) already claimed for extraction
+        # uuids that have a -overlay.png, filled in by list_main_refs()
+        self.overlay_uuids: set[str] = set()
 
     def _filter_new(self, names: list[str]) -> list[str]:
         kept = []
@@ -216,11 +218,14 @@ class ExportSource:
                 seen.add(key)
                 if m.group("kind") == "main":
                     refs.append((m.group("date"), m.group("uuid"), m.group("ext")))
+                else:
+                    self.overlay_uuids.add(m.group("uuid"))
 
+        self.overlay_uuids = set()
         if self._primary_dir is not None:
             for memories_dir in self._primary_dir.rglob("memories"):
                 if memories_dir.is_dir():
-                    consume([p.name for p in memories_dir.iterdir() if p.is_file()])
+                    consume([f"memories/{p.name}" for p in memories_dir.iterdir() if p.is_file()])
 
         for nz in self._nested_entries:
             if nz.entry is None:

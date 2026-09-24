@@ -29,9 +29,20 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="only process the first N items (for testing)")
     parser.add_argument("--no-overlay", action="store_true", help="don't merge -overlay.png onto -main files")
     parser.add_argument("--dry-run", action="store_true", help="match and report, but don't write any output")
+    parser.add_argument(
+        "--only-overlay-videos",
+        action="store_true",
+        help="only (re)process videos that have an overlay (implies overlay merging); "
+        "rewrites them in place in --output, leaving everything else untouched",
+    )
     args = parser.parse_args()
 
-    options = core.Options(merge_overlay=not args.no_overlay, dry_run=args.dry_run, limit=args.limit)
+    options = core.Options(
+        merge_overlay=not args.no_overlay,
+        dry_run=args.dry_run,
+        limit=args.limit,
+        only_overlay_videos=args.only_overlay_videos,
+    )
 
     def on_progress(i, total, result):
         print(_format_result(i, total, result))

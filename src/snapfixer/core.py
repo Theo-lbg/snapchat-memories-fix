@@ -37,6 +37,10 @@ class Options:
     merge_overlay: bool = True
     dry_run: bool = False
     limit: Optional[int] = None
+    # Only (re)process videos that have an overlay -- the only ones the tool
+    # re-encodes. Implies merge_overlay. Lets a previous run's output be
+    # fixed in place without redoing every photo and untouched video.
+    only_overlay_videos: bool = False
 
 
 @dataclass
@@ -112,12 +116,23 @@ def run(source: Path, output: Path, options: Options, on_progress: Optional[Call
             )
 
         json_entries = load_json_entries(src.memories_json)
-        refs = src.list_main_refs()
+        all_refs = src.list_main_refs()
+        # Matching needs every file's date visible, so it always runs on the
+        # full list -- selection below only decides what gets (re)written.
+        index = build_match_index(all_refs, json_entries)
+
+        refs = all_refs
+        merge_overlay = options.merge_overlay
+        if options.only_overlay_videos:
+            merge_overlay = True
+            refs = [
+                r for r in all_refs
+                if r[2].lower() in ("mp4", "mov") and r[1] in src.overlay_uuids
+            ]
         if options.limit:
             refs = refs[: options.limit]
         total = len(refs)
         wanted_uuids = {uuid for _date, uuid, _ext in refs}
-        index = build_match_index(refs, json_entries)
 
         summary = RunSummary(total=total)
         processed = 0
@@ -141,7 +156,7 @@ def run(source: Path, output: Path, options: Options, on_progress: Optional[Call
                 result.outname = str(out_path)
             else:
                 try:
-                    _process_one(item, timestamp, lat, lon, out_path, options.merge_overlay)
+                    _process_one(item, timestamp, lat, lon, out_path, merge_overlay)
                     result.outname = out_path.name
                     summary.ok += 1
                 except Exception as exc:  # noqa: BLE001 - surface any failure per-item, keep going

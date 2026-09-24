@@ -35,6 +35,7 @@ class App(tk.Tk):
         self.output_var = tk.StringVar()
         self.merge_overlay_var = tk.BooleanVar(value=True)
         self.dry_run_var = tk.BooleanVar(value=False)
+        self.only_overlay_videos_var = tk.BooleanVar(value=False)
         self.use_limit_var = tk.BooleanVar(value=False)
         self.limit_var = tk.StringVar(value="50")
         self.space_note_var = tk.StringVar(value="")
@@ -88,6 +89,14 @@ class App(tk.Tk):
         ttk.Checkbutton(
             row3, text="Fusionner les superpositions (-overlay.png) sur les photos/vidéos",
             variable=self.merge_overlay_var,
+        ).pack(side="left")
+
+        row3b = ttk.Frame(opts_frame)
+        row3b.pack(fill="x", padx=8, pady=4)
+        ttk.Checkbutton(
+            row3b,
+            text="Ne retraiter que les vidéos avec superposition (répare une sortie déjà générée, dans le même dossier)",
+            variable=self.only_overlay_videos_var,
         ).pack(side="left")
 
         row4 = ttk.Frame(opts_frame)
@@ -205,7 +214,7 @@ class App(tk.Tk):
             limit = int(raw)
 
         self._update_space_note()
-        if not limit and not self.dry_run_var.get():
+        if not limit and not self.dry_run_var.get() and not self.only_overlay_videos_var.get():
             estimate = core.estimate_source_bytes(Path(source))
             os.makedirs(output, exist_ok=True)
             free = shutil.disk_usage(output).free
@@ -225,6 +234,7 @@ class App(tk.Tk):
             merge_overlay=self.merge_overlay_var.get(),
             dry_run=self.dry_run_var.get(),
             limit=limit,
+            only_overlay_videos=self.only_overlay_videos_var.get(),
         )
 
         self.log_text.configure(state="normal")

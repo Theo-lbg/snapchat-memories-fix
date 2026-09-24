@@ -38,8 +38,17 @@ def merge_video_overlay(
         # libx264 requires even width/height; some Snapchat exports have odd
         # dimensions (e.g. 1170x2079), so pad up to the next even size after
         # compositing the overlay.
+        # Many Snapchat captures are full-range yuvj420p; libx264 would keep
+        # that flag (color_range=pc), which iCloud/Photos reject as an
+        # unsupported file. Convert to the standard limited-range yuv420p
+        # BT.709 that iPhones produce.
         "-filter_complex",
-        "[0:v][1:v]scale2ref[base][ovr];[base][ovr]overlay=0:0,pad=ceil(iw/2)*2:ceil(ih/2)*2",
+        "[0:v][1:v]scale2ref[base][ovr];[base][ovr]overlay=0:0,pad=ceil(iw/2)*2:ceil(ih/2)*2,"
+        "scale=out_range=tv:out_color_matrix=bt709,format=yuv420p",
+        "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-profile:v", "high",
+        "-pix_fmt", "yuv420p",
+        "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off",
+        "-movflags", "+faststart",
         "-map_metadata", "0",
         "-c:a", "copy",
     ]
